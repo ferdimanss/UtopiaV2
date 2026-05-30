@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>議題生成 Prompt 組成說明（新人快速上手版）</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1f2933; --muted:#5b6b7b;
+    --line:#e1e6eb; --accent:#2b6cb0; --accent-soft:#eaf2fb;
+    --code-bg:#1e242c; --code-ink:#e6edf3; --tip-bg:#fff8e6; --tip-line:#f0d98a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Microsoft JhengHei","PingFang TC","Noto Sans TC",system-ui,sans-serif;
+    line-height:1.75; font-size:16px;
+  }
+  .wrap{max-width:960px; margin:0 auto; padding:32px 20px 80px;}
+  header.page{
+    background:var(--accent); color:#fff; border-radius:14px;
+    padding:26px 28px; margin-bottom:24px;
+  }
+  header.page h1{margin:0 0 6px; font-size:26px;}
+  header.page p{margin:0; opacity:.92; font-size:15px;}
+  nav.toc{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:16px 22px; margin-bottom:22px;
+  }
+  nav.toc strong{display:block; margin-bottom:8px; color:var(--muted); font-size:14px;}
+  nav.toc ol{margin:0; padding-left:20px;}
+  nav.toc a{color:var(--accent); text-decoration:none;}
+  nav.toc a:hover{text-decoration:underline;}
+  .tip{
+    background:var(--tip-bg); border:1px solid var(--tip-line); border-left:5px solid #e0b32a;
+    border-radius:10px; padding:14px 18px; margin:0 0 26px;
+  }
+  .tip b{color:#8a6d12;}
+  section{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:22px 26px; margin-bottom:22px;
+  }
+  section h2{
+    margin:0 0 14px; font-size:21px; padding-bottom:8px;
+    border-bottom:2px solid var(--accent-soft); scroll-margin-top:16px;
+  }
+  section h3{font-size:17px; margin:22px 0 8px; color:var(--accent);}
+  p{margin:10px 0;}
+  blockquote{
+    margin:12px 0; padding:8px 16px; border-left:4px solid var(--line);
+    color:var(--muted); background:#fafbfc; border-radius:0 8px 8px 0;
+  }
+  table{border-collapse:collapse; width:100%; margin:12px 0; font-size:14.5px;}
+  th,td{border:1px solid var(--line); padding:8px 11px; text-align:left; vertical-align:top;}
+  th{background:var(--accent-soft); color:#234e74; font-weight:600;}
+  tr:nth-child(even) td{background:#fafbfc;}
+  code{
+    background:#eef1f4; padding:1px 6px; border-radius:5px; font-size:13.5px;
+    font-family:"Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  pre{
+    background:var(--code-bg); color:var(--code-ink); border-radius:10px;
+    padding:16px 18px; overflow-x:auto; font-size:13px; line-height:1.55;
+    font-family:"Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  pre code{background:none; padding:0; color:inherit; font-size:inherit;}
+  .back{display:inline-block; margin-top:10px; font-size:13px; color:var(--muted); text-decoration:none;}
+  .back:hover{color:var(--accent);}
+  ul,ol{padding-left:22px;}
+  li{margin:4px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>議題生成 Prompt 組成說明</h1>
+  <p>快速上手版 ｜ 議題生成結果哪裡怪怪的，照這份就能找到「要去哪個檔、哪一段」調整</p>
+</header>
+
+<nav class="toc">
+  <strong>📑 目錄</strong>
+  <ol>
+    <li><a href="#s1">Prompt 七段結構總覽（先懂全貌）</a></li>
+    <li><a href="#s4">「老師覺得 X 怪怪的」速查表（最實用）</a></li>
+    <li><a href="#s2">完整模擬範例</a></li>
+    <li><a href="#s3">逐段拆解 — 每段來自哪裡</a></li>
+    <li><a href="#s0">目前系統的幾個刻意設計 / 上限</a></li>
+    <li><a href="#s5">規則引擎判定流程（理解用）</a></li>
+  </ol>
+</nav>
+
+<div class="tip">
+  <b>👋 先讀這裡：</b>HOST（老師）按「✨ AI 生成議題」時，系統會把一份很長的 prompt 送給 AI。
+  這份 prompt 由 <b>7 段</b>拼成，有些是<b>老師可在大廳直接編輯</b>的、有些是<b>系統自動算出來</b>的。
+  想調整議題效果，先看 <a href="#s4">第 2 段速查表</a>對照「症狀 → 去哪改」最快；想理解原理再往下看。
+</div>
+
+<!-- ===================== §1 ===================== -->
+<section id="s1">
+  <h2>1. Prompt 七段結構總覽</h2>
+  <p>HOST 按「✨ AI 生成議題」後，送給 AI 的完整 prompt 由 <b>7 段</b>串接而成
+  （<code>socket/aiHelper.js</code> <code>generateAIEvents</code> 內
+  <code>composePrompt(template, staticKnowledge, dataBlock1, dataBlock2) + schema</code>）：</p>
+
+<pre><code>┌─────────────────────────────────────────────┬──────────────────────────────┐
+│ 段落                                          │ 來源                          │
+├─────────────────────────────────────────────┼──────────────────────────────┤
+│ ① 🧑 角色                                      │ prompts/event_generation.md   │ ← 老師可編
+│ ② [INSERT_DATA #0] 靜態知識                    │ World.csv + actioncards.csv   │ ← 程式動態組
+│ ③ 📋 規則 + ✅ 需求                            │ prompts/event_generation.md   │ ← 老師可編
+│ ④ [INSERT_DATA #1] 本回合資料 + 規則引擎結果    │ 多來源（見 §4 逐段拆解）       │ ← 程式動態組
+│ ⑤ 🚫 禁止                                      │ prompts/event_generation.md   │ ← 老師可編
+│ ⑥ [INSERT_DATA #2] 系統強制禁止                │ aiHelper.js 寫死              │ ← 工程師改
+│ ⑦ 輸出 JSON schema                             │ aiHelper.js 寫死              │ ← 工程師改
+└─────────────────────────────────────────────┴──────────────────────────────┘</code></pre>
+
+  <ul>
+    <li>①③⑤ 是老師在 HOST 大廳能直接編輯的 4 區（角色 / 規則 / 需求 / 禁止）。儲存只存記憶體，
+      <b>重啟伺服器會還原成 <code>prompts/event_generation.md</code></b>，要永久改請編該檔。</li>
+    <li>②④⑥⑦ 是系統自動插入，老師在編輯器上看到的是 3 個唯讀膠囊（📚 / 📌 / 🔒），看不到實際內容。</li>
+  </ul>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+<!-- ===================== §4 速查表 ===================== -->
+<section id="s4">
+  <h2>2. 「老師覺得 X 怪怪的」→ 去哪裡調整 速查表</h2>
+  <table>
+    <thead><tr><th>老師的反映</th><th>去哪裡調整</th></tr></thead>
+    <tbody>
+      <tr><td>「議題開頭那句話太誇張 / 想改語氣」</td><td><code>event_templates.json</code> <code>firstSentences</code>（21 句，依指標 + 分數）</td></tr>
+      <tr><td>「某建設講出來的後果（短語）不對」</td><td><code>actioncards.csv</code> 那張卡的第 18 欄（全球副作用短語）/ 第 19 欄（國內效果短語）＋ 重啟</td></tr>
+      <tr><td>「議題內文的句型結構想改」</td><td><code>event_templates.json</code> <code>templates.A</code>/<code>B</code>/<code>C</code></td></tr>
+      <tr><td>「情境 C（全球變好）那句固定話想改」</td><td><code>event_templates.json</code> <code>templates.C</code> + <code>scenarioCPhrases</code></td></tr>
+      <tr><td>「公衛空窗期那段固定文本想改」</td><td><code>event_templates.json</code> <code>publicHealthVacuum.fixedText</code></td></tr>
+      <tr><td>「環境議題不該出現某個詞 / 想加禁詞」</td><td><code>event_templates.json</code> <code>environmentTaboos.forbiddenWords</code></td></tr>
+      <tr><td>「某指標配的懲罰（debuff）想換」</td><td><code>event_templates.json</code> <code>debuffByIndicator</code>（同時確認 <code>World.csv</code> id 15-17 狀態名一致）</td></tr>
+      <tr><td>「公衛空窗期主角不該是綠境/新生」</td><td><code>event_templates.json</code> <code>publicHealthVacuum.candidatePrimaryCountries</code></td></tr>
+      <tr><td>「主影響國判定怪怪的（選錯國）」</td><td>程式邏輯 <code>eventComputation.js</code> <code>selectPrimaryCountries</code></td></tr>
+      <tr><td>「受損國判定怪怪的」</td><td>程式邏輯 <code>eventComputation.js</code> <code>identifyDamagedCountries</code></td></tr>
+      <tr><td>「國名 / 國家背景 / 優勢 / 初始數值不對」</td><td><code>World.csv</code> 對應列 ＋ 重啟</td></tr>
+      <tr><td>「建設的數值（效果/副作用）不對」</td><td><code>actioncards.csv</code> 對應卡列 ＋ 重啟</td></tr>
+      <tr><td>「AI 角色語氣 / 標題字數 / 內文字數要求」</td><td><code>event_generation.md</code>（或大廳即時改）</td></tr>
+      <tr><td>「議題數值範圍 / 要不要 AI 生數值」</td><td>HOST 大廳「🎲 AI 數值生成設定」</td></tr>
+      <tr><td>「附帶狀態要正面還負面」</td><td>HOST 大廳「附帶狀態類型」勾選</td></tr>
+      <tr><td>「schema 結構 / 禁止項措辭」</td><td>程式 <code>aiHelper.js</code>（工程師改）</td></tr>
+    </tbody>
+  </table>
+  <blockquote><b>重點提醒：</b>改 <code>event_templates.json</code>、<code>actioncards.csv</code>、<code>World.csv</code> 之後都要<b>重啟 server</b> 才生效（這些都有快取）。HOST 大廳的 prompt / 數值設定是即時生效，但 prompt 重啟會還原成 MD 檔。</blockquote>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+<!-- ===================== §2 模擬範例 ===================== -->
+<section id="s2">
+  <h2>3. 完整模擬範例</h2>
+  <p><b>情境設定</b>：第 1 回合，工業聯盟蓋了「工業區」+「貿易港」，海洋聯邦蓋了「醫療中心」，其他國家沒蓋。<br>
+  （依此算出：生活經濟總分 +4＝情境 B、生態環境 −3＝情境 A、健康衛生 +3＝情境 C）</p>
+  <p>以下是組裝出來、送進 AI 的完整 prompt（標上 ①～⑦ 對應 §1 那張表）：</p>
+
+<pre><code>─────────── ① 🧑 角色（來自 event_generation.md）───────────
+## 🧑 角色
+你是「烏托邦聯邦議題生成助手」。
+你的任務是根據各國本回合的建設結果，生成具有對立性與討論價值的全球議題…
+（AI 只負責生標題與輕度語言銜接，嚴禁自行擴充世界觀、發明短語…）
+
+─────────── ② [#0] 靜態知識（程式從 CSV 組）───────────
+### 🌐 世界背景 ###
+第三次世界大戰爆發後，人們不斷的爭奪、破壞，地球上的文明被重創…
+
+### 🏳️ 六大倖存國家 ###
+- 工業聯盟（id=1）：戰後經濟的發動機…  初始 金錢 10 / 人口 8 / 環境 6。優勢：經濟建設國力收益+1
+- 科技共和國（id=2）：…  初始 金錢 9 / 人口 8 / 環境 7。優勢：經濟建設金錢成本-1
+- 新生共和國（id=3）：…  優勢：社會建設國力收益+1
+- 綠境公國（id=4）：…    優勢：社會建設金錢成本-1
+- 資源王國（id=5）：…    優勢：環境建設國力收益+1
+- 海洋聯邦（id=6）：…    優勢：環境建設金錢成本-1
+
+### 🏗️ 九大建設規格 ###
+### 經濟建設
+  貿易港 條件：人口 2；環境 ≥ 4 | 消耗：金錢 3
+    國內效果：金錢+5 | 全球效果：生活經濟+2
+    國內副作用：環境-1 | 全球副作用：生態環境-1
+  工業區 條件：人口 3；環境 ≥ 6 | 消耗：金錢 5
+    國內效果：金錢+8 | 全球效果：生活經濟+3
+    國內副作用：環境-3 | 全球副作用：生態環境-2
+  金融中心 …
+### 社會建設
+  醫療中心 … 全球效果：健康衛生+3 | 全球副作用：生活經濟-1 …
+  大學校院 … 城市住宅 …
+### 環境建設
+  自然保護區 … 永續農業 … 生態復育工程 …
+
+─────────── ③ 📋 規則 + ✅ 需求（來自 event_generation.md）───────────
+## 📋 規則
+- 每回合生成 3 個議題，分別對應「生活經濟 / 生態環境 / 健康衛生」三大指標
+- 主影響國由系統判定，AI 不需自行計算
+- 議題內容必須嚴格套用系統提供的模板公式…
+## ✅ 需求
+1. 事件標題（name）：5–10 字，新聞風格
+2. 議題內容（description）：120–200 字，融合成單一段落…
+3. 三個議題語氣可帶辛辣或幽默，但語境要一致
+
+─────────── ④ [#1] 本回合資料 + 規則引擎結果（程式組）───────────
+### 各國當前狀態 ###
+  工業聯盟（id=1）：金錢 10 / 人口 8 / 環境 6 | 狀態：無
+  …（六國）…
+
+### 本回合各國建設 ###
+  工業聯盟（id=1）：工業區、貿易港
+  海洋聯邦（id=6）：醫療中心
+  …其他：（本回合未蓋）…
+
+### 目前仍未解決的議題（請避免重複主題）###
+  （無）
+
+### 🔧 系統規則引擎輸出（請嚴格依此指令生成 3 個議題）###
+（以下資料已由系統依「議題生成最終.md」STEP 1-6 規則計算完成，AI 不需重新推理）
+
+━━ 議題 1：生活經濟（總分 4，情境 B）━━
+• 主影響國：海洋聯邦（id=6）
+• 必須使用的第一句（一字不漏）：「全球貿易蓬勃發展，民眾生活水準大幅提升，到處都是繁榮景象。」
+• 必須使用的「國內效果短語」：「大量國民人口增長」
+• 必須使用的「全球副作用核心短語」：「全球物資流動受阻與商業成本大幅增加」
+• 套用情境 B 模板（公式內容由系統提供於下方）
+• 受損國：工業聯盟（因為本回合建造了帶來全球加分的建設，被迫…）
+• 議題影響（debuff）：經濟制裁
+
+━━ 議題 2：生態環境（總分 -3，情境 A）━━
+• 主影響國：工業聯盟（id=1）
+• 必須使用的第一句（一字不漏）：「全球正遭遇極端的森林大面積枯萎、土地嚴重沙化與嚴重的缺水危機。」
+• 必須使用的「國內效果短語」：「龐大產業金錢收益」與「巨額金錢收益提升」
+• 必須使用的「全球副作用核心短語」：「周邊跨國棲地退化與區域環境汙染外溢」與「全球環境品質部分惡化」
+• 套用情境 A 模板…
+• 受損國：除了 工業聯盟 以外的其他五國（…）
+• 議題影響（debuff）：環境災害
+
+━━ 議題 3：健康衛生（總分 3，情境 C）━━
+• 主影響國（最大貢獻國）：海洋聯邦（id=6）
+• 必須使用的領域短語：「社會照護需求快速成長」
+• 套用情境 C 模板…
+• 受損國：全球（因單一領域過快擴張引發整體系統失衡…）
+• 議題影響（debuff）：公共危機
+
+### 📐 議題內容拼接公式（嚴格套用，不可改動結構或刪除粗體 **）###
+情境 A 公式：**{firstSentence}**其中，**{primaryCountry}**國內呈現**{domesticPhrases}**…
+情境 B 公式：**{firstSentence}**然而，**{primaryCountry}**國內呈現…
+情境 C 公式：**{scenarioCPhrase}。** 其中，特別是**{maxContributorCountry}**…
+
+### 🚨 環境議題禁忌詞 ###
+寫「生態環境」指標的議題時，禁止出現以下詞彙：工廠、原料、生產、停工、斷貨、貿易、資金、物價、撈錢、市場、產業
+請以「擴建生存聚落／過度採集自然資源／垃圾與排泄物外溢」等動機替代。
+
+### 數值對照 ###
+本局數值由 HOST 手動設定，所有 effects 系統會強制歸零
+（↑ 此句取決於 HOST 大廳「議題：AI 生成數值影響」勾選，預設不勾）
+
+### Output 規格（補充需求說明）###
+- events 陣列長度必須為 3
+- 順序對應上方 directive 順序：生活經濟 → 生態環境 → 健康衛生
+- …
+
+─────────── ⑤ 🚫 禁止（來自 event_generation.md）───────────
+## 🚫 禁止
+- 不要重複「目前仍未解決的議題」清單中的主題
+- 不要 3 個議題都用相似的句式
+- 不可加入系統未提供的建設短語、場景句、debuff 名稱
+- 不可改寫系統提供的「第一句」與「公衛空窗期固定文本」，必須一字不漏使用
+
+─────────── ⑥ [#2] 系統強制禁止（aiHelper.js 寫死）───────────
+### 🔒 隱藏禁止項（系統強制） ###
+- 不可改寫 directive 指定的「第一句」與「公衛空窗期固定文本」，必須一字不漏複製
+- 不可使用 directive 提供以外的短語（短語來源為 actioncards.csv，AI 不可自創）
+- 主影響國 ID 必須等於 directive 指定值（即使 AI 不輸出，server 也會強制覆寫）
+- pendingDebuffs 由 server 從 directive 自動產生（本局僅允許負面狀態）
+- 環境議題禁止使用「工廠、原料…產業」等詞
+
+─────────── ⑦ 輸出 JSON schema（aiHelper.js 寫死）───────────
+### 輸出（純 JSON，無 markdown，無註解）###
+{
+  "events": [
+    { "indicator": "生活經濟", "name": "…", "description": "…",
+      "worldEffects": {…}, "primaryEffects": {…}, "secondaryEffects": […] },
+    { "indicator": "生態環境", … },
+    { "indicator": "健康衛生", … }
+  ]
+}</code></pre>
+
+  <p>AI 拿到後，實際只需要：填每則的 <code>name</code>（標題）、用公式 + 上面給的短語拼出 <code>description</code>。
+  <code>primaryTeam</code> / <code>pendingDebuffs</code> / 受損國 server 會自己覆寫。</p>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+<!-- ===================== §3 逐段拆解 ===================== -->
+<section id="s3">
+  <h2>4. 逐段拆解 — 每個部分來自哪裡</h2>
+
+  <h3>① 🧑 角色 ｜ ③ 📋 規則 + ✅ 需求 ｜ ⑤ 🚫 禁止</h3>
+  <table>
+    <thead><tr><th>想改什麼</th><th>去哪裡</th></tr></thead>
+    <tbody>
+      <tr><td>角色設定、語氣、AI 的身分</td><td><code>prompts/event_generation.md</code> <code>## 🧑 角色</code> 段（或 HOST 大廳「🧑 角色」textarea，重啟還原）</td></tr>
+      <tr><td>「生成幾個議題」「對應哪些指標」等規則文字</td><td>同檔 <code>## 📋 規則</code> 段</td></tr>
+      <tr><td>標題字數、議題內文字數、語氣要求</td><td>同檔 <code>## ✅ 需求</code> 段</td></tr>
+      <tr><td>風格性禁止（不要重複句式…）</td><td>同檔 <code>## 🚫 禁止</code> 段</td></tr>
+    </tbody>
+  </table>
+  <blockquote>老師大廳即時改 = 暫時（記憶體）；要永久 = 編 MD 檔。</blockquote>
+
+  <h3>② [#0] 靜態知識</h3>
+  <p>組裝函式：<code>socket/aiHelper.js</code> <code>buildStaticKnowledgeBlock(state)</code></p>
+  <table>
+    <thead><tr><th>內容</th><th>來源檔案 + 位置</th></tr></thead>
+    <tbody>
+      <tr><td>世界背景那段文字</td><td><code>gamedata/World.csv</code> 第 2 列（id=0）的「背景與說明」欄</td></tr>
+      <tr><td>各國名稱</td><td>World.csv 第 3-8 列（id=1-6）的「名稱」欄</td></tr>
+      <tr><td>各國背景描述</td><td>World.csv 同列「背景與說明」欄</td></tr>
+      <tr><td>各國初始數值（金錢/人口/環境）</td><td>World.csv 同列第 7-9 欄（v1/v2/v3）</td></tr>
+      <tr><td>各國優勢文字</td><td>World.csv 同列「優勢」欄（第 15 欄）</td></tr>
+      <tr><td>9 建設的名稱/條件/消耗/四軸效果</td><td><code>gamedata/actioncards.csv</code> 對應卡片列（數值由程式從 Req/Visible/Hidden 欄推算成四軸）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>④ [#1] 本回合資料 + 規則引擎結果</h3>
+  <p>組裝位置：<code>socket/aiHelper.js</code> <code>generateAIEvents</code> 內 <code>dataBlock1</code></p>
+  <table>
+    <thead><tr><th>子區塊</th><th>來源</th></tr></thead>
+    <tbody>
+      <tr><td>各國當前狀態（v1/v2/v3）</td><td>runtime <code>state.teams[].values</code>（初始來自 World.csv，遊戲中會變動）</td></tr>
+      <tr><td>各國當前持有狀態</td><td>runtime <code>state.teamStatuses</code></td></tr>
+      <tr><td>本回合各國建設</td><td><code>eventComputation.aggregateRoundBuildings</code></td></tr>
+      <tr><td>未解議題列表</td><td>runtime <code>state.events</code></td></tr>
+      <tr><td><b>規則引擎 directive（主影響國/第一句/短語/受損國/debuff）</b></td><td><code>socket/eventComputation.js</code> <code>computeAllEventDirectives</code>，細分如下 ↓</td></tr>
+      <tr><td>└ 主影響國「是誰」</td><td>計算（<code>selectPrimaryCountries</code>）；名稱字串來自 World.csv</td></tr>
+      <tr><td>└ 場景「第一句」</td><td><code>gamedata/event_templates.json</code> <code>firstSentences</code></td></tr>
+      <tr><td>└ 國內效果短語 / 全球副作用短語</td><td><code>gamedata/actioncards.csv</code> 第 18 欄 <code>GlobalSidePhrase</code> / 第 19 欄 <code>DomesticPhrase</code></td></tr>
+      <tr><td>└ 情境 C 領域短語</td><td>event_templates.json <code>scenarioCPhrases</code></td></tr>
+      <tr><td>└ debuff 名稱</td><td>event_templates.json <code>debuffByIndicator</code> + 狀態名稱來自 World.csv（id 15-17）</td></tr>
+      <tr><td>└ 公衛空窗期固定文本</td><td>event_templates.json <code>publicHealthVacuum.fixedText</code></td></tr>
+      <tr><td>└ 受損國判定文字</td><td>計算（<code>identifyDamagedCountries</code>）；名稱來自 World.csv</td></tr>
+      <tr><td>議題內容拼接公式（情境 A/B/C）</td><td>event_templates.json <code>templates.A</code> / <code>B</code> / <code>C</code></td></tr>
+      <tr><td>環境禁忌詞</td><td>event_templates.json <code>environmentTaboos</code></td></tr>
+      <tr><td>數值對照（範圍 or 歸零提示）</td><td>HOST 大廳「🎲 AI 數值生成設定」→ <code>state.gameSettings.aiGenerationSettings.events</code></td></tr>
+      <tr><td>Output 規格那幾條</td><td>寫死在 aiHelper.js <code>dataBlock1</code> 字串</td></tr>
+    </tbody>
+  </table>
+
+  <h3>⑥ [#2] 系統強制禁止</h3>
+  <table>
+    <thead><tr><th>內容</th><th>來源</th></tr></thead>
+    <tbody>
+      <tr><td>整段禁止文字</td><td>寫死在 <code>socket/aiHelper.js</code> <code>generateAIEvents</code> 內 <code>dataBlock2</code></td></tr>
+      <tr><td>「本局允許正面/負面狀態」那句</td><td>HOST 大廳「附帶狀態類型」勾選 → <code>aiGenerationSettings.events.pendingStatusPolarities</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>⑦ 輸出 JSON schema</h3>
+  <table>
+    <thead><tr><th>內容</th><th>來源</th></tr></thead>
+    <tbody>
+      <tr><td>schema 結構</td><td>寫死在 <code>socket/aiHelper.js</code> <code>buildEventDirectiveSchema()</code></td></tr>
+      <tr><td>effects 數值範圍提示</td><td>HOST 大廳「🎲 AI 數值生成設定」→ <code>aiGenerationSettings.events</code></td></tr>
+    </tbody>
+  </table>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+<!-- ===================== §0 簡化 ===================== -->
+<section id="s0">
+  <h2>5. 目前系統的幾個刻意設計 / 上限</h2>
+  <p>以下是系統目前的幾項客觀現況，當結果跟直覺不同時可先對照，知道是「刻意這樣設計」而非異常。</p>
+
+  <h3>📐 全球副作用核心短語：只取「扣本議題指標」的建設</h3>
+  <p>議題內文裡「並進一步引發全球 <b>○○○</b>」那段粗體，填的是主影響國建設造成的全球副作用短語（來自 actioncards.csv 第 18 欄）。
+  目前程式（<code>convertBuildingsToPhrases</code>）<b>只取「對本議題指標扣分」的建設</b>的短語，不放主影響國其他指標的建設短語。</p>
+  <ul>
+    <li><b>舉例</b>：工業聯盟同回合蓋了「工業區」（扣生態環境 −2）+「金融中心」（扣健康衛生 −1），它成為<b>生態環境</b>議題主影響國 →
+      只放工業區的「周邊跨國棲地退化…」，金融中心扣的是健康衛生、不放它的短語。</li>
+    <li><b>這樣設計的好處</b>：① 主題一致（生態環境議題不會冒出「藥品分配」這種醫療字眼）；
+      ② 不踩環境禁忌詞；③ 因果乾淨（這則講生態變糟，就只列造成生態變糟的建設）。</li>
+    <li><b>若想改成「放所有建設短語」</b>：要動 <code>eventComputation.js</code> <code>convertBuildingsToPhrases</code>，
+      把全球副作用短語的篩選從「只取 <code>b[w] &lt; 0</code>」放寬成「取所有 <code>b.globalSidePhrase</code> 非空的建設」。</li>
+  </ul>
+  <blockquote>實務上多數情況兩種做法結果相同 —— 主影響國通常是「因為扣了這個指標才被選為主影響國」，建設大多在扣同一指標。只有「主影響國同時蓋了影響別指標的建設」這種較少見情況才有差。</blockquote>
+
+  <h3>📐 平手判定：第二排序用「該國本回合所有建設的國內效果絕對值總和」</h3>
+  <p>當兩國對某指標的「扣分絕對值總和」<b>完全相同</b>（平手）時，用「本回合因建設獲得的國內效果（國力收益）絕對值總和」當第二排序，高者當主影響國。
+  目前程式（<code>aggregatePerCountryIndicatorScore</code> 的 <code>domesticAbsSum</code>）是把該國<b>本回合所有建設</b>的 v1/v2/v3 絕對值全加。</p>
+  <ul>
+    <li><b>觸發極罕見</b>：要兩國「扣分絕對值總和剛好一模一樣」才會用到，本身就很少發生。</li>
+    <li><b>結果幾乎一樣</b>：會走到平手的兩國建設組合通常相近，全加 vs 只加扣分建設的排序大多不變。</li>
+    <li><b>若想只算扣分建設</b>：改 <code>eventComputation.js</code> <code>aggregatePerCountryIndicatorScore</code>，
+      把 <code>domesticAbsSum</code> 改成「只在 <code>b[w] &lt; 0</code> 的建設上加 v1/v2/v3 絕對值」。</li>
+  </ul>
+
+  <h3>📌 副影響國上限：最多 3 國</h3>
+  <p>「情境 A 集體擺爛」時受損國敘述文字會寫「其餘五國」，但 <code>aiHelper.js</code> <code>_buildEventFromDirective</code>
+  把實際記錄的 <code>secondaryTeams</code>（副影響國）截斷成最多 <b>3 國</b>。</p>
+  <ul>
+    <li>避免一則議題塞 5 個副影響國，後續評語會太雜。</li>
+    <li>純粹是「畫面敘述文字」與「實際記錄副影響國數」不完全對齊，不影響運算。</li>
+  </ul>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+<!-- ===================== §5 ===================== -->
+<section id="s5">
+  <h2>6. 附：規則引擎判定流程（理解用，非調整入口）</h2>
+<pre><code>本回合各國建設（teamBuilt 本回合部分）
+  → 算各指標全球總分
+  → 依序判定 3 個主影響國（生活經濟→生態環境→健康衛生，排他遞補）
+  → 各指標判情境：總分>0且無人扣分=C / 總分>0=B / 否則=A
+  → 場景第一句（依指標+總分，區間截斷 ±3）
+  → 主影響國扣分建設 → 提取短語（去重、最多 2 種、扣分最高優先）
+  → 受損國 4 原則（公衛空窗期→情境C→有人加分擦屁股→集體擺爛）
+  → 依指標配 debuff
+  → 特例：六國都沒碰健康衛生 → 公衛空窗期，主角綠境/新生隨機 2 選 1，固定文本</code></pre>
+  <p>每一步對應的函式與檔案見 <code>docs/structure.md</code> §3.6.1。</p>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+</div>
+</body>
+</html>
