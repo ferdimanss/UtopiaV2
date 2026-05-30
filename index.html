@@ -87,6 +87,7 @@
     <li><a href="#s3">逐段拆解 — 每段來自哪裡</a></li>
     <li><a href="#s0">目前系統的幾個刻意設計 / 上限</a></li>
     <li><a href="#s5">規則引擎判定流程（理解用）</a></li>
+    <li><a href="#sv">AI 評語生成 Prompt 組成</a></li>
   </ol>
 </nav>
 
@@ -416,6 +417,223 @@
   → 依指標配 debuff
   → 特例：六國都沒碰健康衛生 → 公衛空窗期，主角綠境/新生隨機 2 選 1，固定文本</code></pre>
   <p>每一步對應的函式與檔案見 <code>docs/structure.md</code> §3.6.1。</p>
+  <a class="back" href="#">↑ 回頂部</a>
+</section>
+
+<!-- ===================== §評語 ===================== -->
+<section id="sv">
+  <h2>7. AI 評語生成 Prompt 組成（目前版本）</h2>
+  <blockquote>上面 §1–§6 講的是「<b>議題</b>怎麼生」；這一節講「議題有了宣言之後，<b>評語</b>怎麼生」。</blockquote>
+
+  <h3>7.1 觸發點與整體結構</h3>
+  <p>HOST 在某一則<b>已有主影響國宣言</b>的議題上按「AI 評語」→ 觸發 <code>game:request_event_ai_verdict</code>（payload <code>{eventId, useAINumbers}</code>）→ 呼叫 <code>socket/aiHelper.js</code> <code>generateAIEventVerdict(state, eventId, useAINumbers, io)</code>。</p>
+  <p>評語是<b>單篇</b>生成（一次只針對一則議題），prompt 結構跟議題一樣是 <code>composePrompt(template, #0, #1, #2) + 輸出 schema</code>，共 7 段：</p>
+
+<pre><code>┌──────────────────────────────────────────┬─────────────────────────────────┐
+│ 段落                                       │ 來源                             │
+├──────────────────────────────────────────┼─────────────────────────────────┤
+│ ① 🧑 角色（資深地緣政治分析師）            │ prompts/verdict_generation.md    │ ← 老師可編
+│ ② [#0] 靜態知識                            │ buildStaticKnowledgeBlock（共用） │ ← 程式動態組
+│ ③ 📋 規則 + ✅ 需求                        │ prompts/verdict_generation.md    │ ← 老師可編
+│ ④ [#1] 議題背景 + 主影響國現況 + 脈絡       │ aiHelper.js dataBlock1            │ ← 程式動態組
+│ ⑤ 🚫 禁止                                  │ prompts/verdict_generation.md    │ ← 老師可編
+│ ⑥ [#2] 系統強制禁止                        │ aiHelper.js dataBlock2            │ ← 工程師改
+│ ⑦ 輸出 JSON schema                         │ aiHelper.js VERDICT_OUTPUT_SCHEMA │ ← 工程師改
+└──────────────────────────────────────────┴─────────────────────────────────┘</code></pre>
+
+  <ul>
+    <li>②[#0] 靜態知識（世界觀 + 6 國 + 9 建設規格）與議題生成<b>共用同一份</b> <code>buildStaticKnowledgeBlock</code>。</li>
+    <li>①③⑤ 老師可在 HOST 大廳即時編輯（記憶體，重啟還原成 <code>prompts/verdict_generation.md</code>）。</li>
+  </ul>
+
+  <h3>7.2 ④ [#1] 資料區：逐區塊說明</h3>
+  <p><code>dataBlock1</code> 由程式組裝，內容比議題的更聚焦在「這一則議題與主影響國的處境」：</p>
+  <table>
+    <thead><tr><th>子區塊</th><th>內容 / 來源</th></tr></thead>
+    <tbody>
+      <tr><td>議題背景</td><td>議題 ID / 回合 / 名稱 / 描述 / 主影響國 / <b>主影響國宣言</b> / 副影響國清單（皆來自 <code>state.events</code> + <code>eventDecisions</code>，<b>直接沿用該議題已記錄的影響國</b>，不重算）</td></tr>
+      <tr><td>議題附帶懲罰</td><td>該議題的 <code>event.pendingDebuffs</code>（讓 AI 知道「不解決會發生什麼」）</td></tr>
+      <tr><td>主影響國當前狀況</td><td>runtime：當前資源 v1/v2/v3 + 持有狀態 + 已完成建設</td></tr>
+      <tr><td>其他未解議題列表</td><td><code>state.events</code> 中其他未解議題，標註「【本國涉及】」</td></tr>
+      <tr><td>數值對照</td><td>依開關顯示數值範圍，或「系統會強制歸零」提示</td></tr>
+      <tr><td>可分配狀態</td><td>依 <code>generateStatuses</code> 開關顯示清單或「本次不建議狀態」</td></tr>
+      <tr><td>跨回合提示</td><td>若議題是前幾回合遺留，加註「已歷經多回合未解決」</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.3 兩個關鍵開關（HOST 大廳「🎲 AI 數值生成設定」→ 評語）</h3>
+  <p>對應 <code>state.gameSettings.aiGenerationSettings.verdicts</code>：</p>
+  <table>
+    <thead><tr><th>開關</th><th>預設</th><th>行為</th></tr></thead>
+    <tbody>
+      <tr><td><code>generateEffects</code></td><td><b>true</b></td><td>是否要 AI 生數值。<b>但還要搭配按鈕當下的 <code>useAINumbers</code></b>：兩者都 true 才真的生數值（程式內 <code>shouldGenerateNumbers</code>）。任一為 false → server 強制 <code>worldStats</code> / <code>primaryTeamStats</code> / <code>secondaryResults[].teamStats</code> <b>全部歸零</b></td></tr>
+      <tr><td><code>generateStatuses</code></td><td><b>false</b></td><td>是否要 AI 額外建議「附帶狀態」。false（預設）→ server 強制 <code>primarySuggestedStatuses</code> 與所有 <code>secondaryResults[].suggestedStatuses</code> 為空陣列（因為議題本身已有 <code>pendingDebuffs</code> 自動套用，避免重複）。true → 依 <code>events.pendingStatusPolarities</code> 過濾（<b>與議題共用同一個正負性設定</b>）</td></tr>
+    </tbody>
+  </table>
+  <p>數值範圍（<code>generateEffects=true</code> 時才用到）：<code>worldStatRange</code> / <code>primaryStatRange</code> / <code>secondaryStatRange</code> —— <b>主影響國與副影響國範圍不同</b>，且副影響國影響應比主影響國輕微。</p>
+  <blockquote><b>雙重保險：</b>上述歸零 / 狀態過濾在 server 解析 AI 回傳後<b>再做一次</b>（不是只靠 prompt 提醒 AI），所以就算 AI 不聽話也會被擋下。</blockquote>
+
+  <h3>7.4 ⑥ [#2] 系統強制禁止：逐條說明</h3>
+  <p><code>dataBlock2</code> 是工程師<b>寫死</b>的 4 條硬性規則，跟 ⑤（老師可編的風格禁止）不同 —— 這段是直接綁「狀態 / 數值」機制的底線，違反會被 server 擋下：</p>
+  <table>
+    <thead><tr><th>條目</th><th>意思</th><th>為何</th></tr></thead>
+    <tbody>
+      <tr><td>不可建議「可分配狀態」清單以外的 status id</td><td>AI 只能從 #1 的「可分配狀態」清單挑 id；亂填的會被 server 過濾掉</td><td>防 AI 自創不存在或本局不允許的狀態</td></tr>
+      <tr><td>不可超過每隊累積 3 個 status 上限</td><td>一隊身上最多同時 3 個狀態</td><td>對齊遊戲狀態上限</td></tr>
+      <tr><td>所有 suggestedStatuses 必須為空陣列<br><span style="color:#5b6b7b">（僅 <code>generateStatuses=false</code> 時才出現這行）</span></td><td>這局根本不讓評語建議狀態</td><td>議題本身已有 <code>pendingDebuffs</code> 自動套用，避免重複加狀態</td></tr>
+      <tr><td>主影響國與副影響國的數值範圍不同，請勿混用</td><td>兩者 range 不一樣（副影響國較輕）</td><td>避免副影響國數值比主影響國還重，邏輯顛倒</td></tr>
+    </tbody>
+  </table>
+  <blockquote>第 3 條是<b>條件式</b>：只有當 <code>generateStatuses=false</code>（預設）時才會出現；若打開（=true），這行不出現，改由 #1 的「可分配狀態」清單 + polarity 規則約束。</blockquote>
+
+  <h3>7.5 完整模擬範例（一則生態環境議題的評語）</h3>
+  <p><b>情境設定</b>：沿用 §3 的第 1 回合世界。工業聯盟蓋了「工業區」+「貿易港」，成為<b>生態環境</b>議題（§3 議題 2）的主影響國，受損國為科技共和國 / 新生共和國 / 綠境公國 3 國。HOST 在這則議題收到工業聯盟宣言後，按下「AI 評語」。<br>
+  <b>本次開關</b>：<code>generateEffects=true</code> 且按鈕勾了 <code>useAINumbers</code> → 會生數值；<code>generateStatuses=false</code>（預設）→ 不建議狀態。</p>
+  <p>以下是組裝出來、送進 AI 的完整評語 prompt（標上 ①～⑦ 對應 §7.1 那張表）：</p>
+
+<pre><code>─────────── ① 🧑 角色（來自 verdict_generation.md）───────────
+## 🧑 角色
+你是一位資深地緣政治分析師。針對單一議題的主影響國宣言，做出結算評語與影響分配。
+語氣可帶辛辣或幽默，但分析要切中議題核心，並考量該國當前處境與其他未解議題的脈絡。
+
+─────────── ② [#0] 靜態知識（程式從 CSV 組，與議題共用）───────────
+### 🌐 世界背景 ###
+第三次世界大戰爆發後…
+### 🏳️ 六大倖存國家 ###
+- 工業聯盟（id=1）：…  初始 金錢 10 / 人口 8 / 環境 6。優勢：經濟建設國力收益+1
+- …（六國）…
+### 🏗️ 九大建設規格 ###
+  工業區 … 全球副作用：生態環境-2 ／ 貿易港 … 全球副作用：生態環境-1 …
+（內容與議題生成的 #0 完全相同，此處省略）
+
+─────────── ③ 📋 規則 + ✅ 需求（來自 verdict_generation.md）───────────
+## 📋 規則
+- 評語應呼應主影響國目前面臨的全局壓力（持有狀態、其他未解議題、當前資源水平）
+- 副影響國的影響程度應比主影響國輕微，且邏輯上與事件相關
+- 若議題為跨回合遺留，評語可呼應其久拖未決
+## ✅ 需求
+針對本議題輸出單一份評語與分配：
+1. conclusion：120–150 字，分析主影響國宣言是否妥善回應議題，可帶辛辣或幽默語氣
+
+─────────── ④ [#1] 議題背景 + 主影響國現況 + 脈絡（程式組）───────────
+### 議題背景 ###
+- 議題 ID：evt-r1-eco
+- 當前回合：1
+- 議題名稱：《工業狂飆，生態拉警報》
+- 議題描述：**全球正遭遇極端的森林大面積枯萎、土地嚴重沙化與嚴重的缺水危機。**其中，**工業聯盟**國內呈現**龐大產業金錢收益**與**巨額金錢收益提升**，並進一步引發全球**周邊跨國棲地退化與區域環境汙染外溢**與**全球環境品質部分惡化**…
+- 主影響國：工業聯盟（id=1）
+- 主影響國宣言：我們承諾撥出本回合工業利潤的三成成立跨國生態復育基金，並於下回合優先興建生態復育工程，逐步抵銷環境外溢。
+- 副影響國：
+  - 副影響國 id=2：科技共和國
+  - 副影響國 id=3：新生共和國
+  - 副影響國 id=4：綠境公國
+- 副影響國數量：3
+
+### 議題附帶懲罰（若未解決將套用）###
+  科技共和國（id=2）：環境災害
+  新生共和國（id=3）：環境災害
+  綠境公國（id=4）：環境災害
+
+### 主影響國當前狀況 ###
+- 國家：工業聯盟（id=1）
+- 當前資源：金錢 18 / 人口 8 / 環境 3
+- 當前持有狀態：無
+- 已完成建設：工業區、貿易港
+
+### 其他未解議題列表（含本回合與過往） ###
+- 《全球榮景下的隱憂》（回合1）主影響國：海洋聯邦 【本國涉及】
+- 《社福擴張的代價》（回合1）主影響國：海洋聯邦
+
+### 數值對照 ###
+世界指標：w1=生活經濟, w2=健康衛生, w3=生態環境（範圍 -2~+3）
+國家資源：v1=金錢, v2=人口, v3=環境（主影響國範圍 -3~+5；副影響國範圍 -2~+3）
+
+### 可分配狀態（評語階段不建議）###
+本次評語不需要建議任何狀態（議題本身已有 pendingDebuffs 自動處理）。
+請將 primarySuggestedStatuses 與所有 secondaryResults[].suggestedStatuses 給空陣列 []
+
+### Output 規格（補充需求說明）###
+- conclusion 120-150 字
+- worldStats / primaryTeamStats / secondaryResults[].teamStats: 依範圍生成
+- secondaryResults 陣列長度必須等於副影響國數量（3）
+
+─────────── ⑤ 🚫 禁止（來自 verdict_generation.md）───────────
+## 🚫 禁止
+（老師寫的風格性禁止項，例如「避免重複句式」、「不要過度說教」等）
+
+─────────── ⑥ [#2] 系統強制禁止（aiHelper.js 寫死）───────────
+### 🔒 隱藏禁止項（系統強制） ###
+- 不可建議「可分配狀態」清單以外的 status id（違者會被 server 過濾）
+- 不可超過每隊累積 3 個 status 上限
+- 所有 suggestedStatuses 必須為空陣列 []（議題已有 pendingDebuffs 自動套用）
+- 主影響國與副影響國的數值範圍不同，請勿混用
+
+─────────── ⑦ 輸出 JSON schema（aiHelper.js 寫死）───────────
+### 輸出（純 JSON，無 markdown）###
+{
+  "conclusion": "評語...",
+  "worldStats": {"w1": 0, "w2": 0, "w3": 0},
+  "primaryTeamStats": {"v1": 0, "v2": 0, "v3": 0},
+  "primarySuggestedStatuses": [],
+  "secondaryResults": [{"teamId":&lt;id&gt;,"teamStats":{"v1":0,"v2":0,"v3":0},"suggestedStatuses":[]}, ...]
+}
+*(沒變動的數值可設 0；secondaryResults 陣列長度必須等於副影響國數量)*</code></pre>
+
+  <p><b>AI 可能回傳（已套上開關規則）</b>：因為 <code>generateStatuses=false</code>，所有 <code>suggestedStatuses</code> 都是空陣列（就算 AI 亂填，server 解析後也會清空）；因為 <code>shouldGenerateNumbers=true</code>，數值依範圍生成並保留：</p>
+<pre><code>{
+  "conclusion": "工業聯盟一邊大撈產業紅利、一邊才想起生態帳單，這份『下回合再復育』的承諾，多少有點先上車後補票的味道。基金立意良善，但環境已掉到 3，遠水救不了近火；周邊三國替它扛下棲地退化的苦果，怨氣難消。若下回合再跳票，這張支票恐怕會連同信用一起貶值。",
+  "worldStats": {"w1": 0, "w2": 0, "w3": -1},
+  "primaryTeamStats": {"v1": -2, "v2": 0, "v3": 1},
+  "primarySuggestedStatuses": [],
+  "secondaryResults": [
+    {"teamId": 2, "teamStats": {"v1": 0, "v2": 0, "v3": -1}, "suggestedStatuses": []},
+    {"teamId": 3, "teamStats": {"v1": 0, "v2": 0, "v3": -1}, "suggestedStatuses": []},
+    {"teamId": 4, "teamStats": {"v1": -1, "v2": 0, "v3": -1}, "suggestedStatuses": []}
+  ]
+}</code></pre>
+  <p>HOST 收到後，在 <code>game:submit_event_conclusion</code> 才決定要不要實際套用這些數值（由按鈕的 <code>useAINumbers</code> 決定）；conclusion 文字會顯示在評語板上。</p>
+
+  <h3>7.6 ⑦ 輸出 JSON schema（<code>VERDICT_OUTPUT_SCHEMA</code>，寫死）</h3>
+<pre><code>{
+  "conclusion": "評語...",               // 120–150 字
+  "worldStats": {"w1":0,"w2":0,"w3":0},
+  "primaryTeamStats": {"v1":0,"v2":0,"v3":0},
+  "primarySuggestedStatuses": [],
+  "secondaryResults": [
+    {"teamId":&lt;id&gt;,"teamStats":{"v1":0,"v2":0,"v3":0},"suggestedStatuses":[]}
+  ]
+}</code></pre>
+  <ul>
+    <li><code>secondaryResults</code> 陣列長度<b>必須等於副影響國數量</b>。</li>
+    <li>HOST 收到評語後，在 <code>game:submit_event_conclusion</code> 才實際決定是否套用這些數值（<code>useAINumbers</code>）。</li>
+  </ul>
+
+  <h3>7.7 評語 vs 議題：差在哪</h3>
+  <table>
+    <thead><tr><th></th><th>議題生成</th><th>評語生成</th></tr></thead>
+    <tbody>
+      <tr><td>數量</td><td>一次生 <b>3 篇</b>（生活經濟/生態環境/健康衛生）</td><td><b>單篇</b>（針對一則議題的宣言）</td></tr>
+      <tr><td>影響國怎麼來</td><td>規則引擎 <code>computeAllEventDirectives</code> <b>算</b>出來</td><td><b>直接沿用</b>該議題已記錄的主/副影響國</td></tr>
+      <tr><td>AI 做什麼</td><td>只填 name + 用模板拼 description</td><td>寫 conclusion +（視開關）建議數值/狀態</td></tr>
+      <tr><td>#1 資料區重點</td><td>規則引擎 directive（場景句/短語/debuff/受損國）</td><td>議題背景 + 主影響國當前處境 + 其他未解議題脈絡</td></tr>
+      <tr><td>觸發事件</td><td><code>game:generate_events</code></td><td><code>game:request_event_ai_verdict</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.8 評語「怪怪的」→ 去哪裡調整 速查表</h3>
+  <table>
+    <thead><tr><th>老師的反映</th><th>去哪裡調整</th></tr></thead>
+    <tbody>
+      <tr><td>「評語的人設 / 語氣 / 身分想改」</td><td><code>verdict_generation.md</code> <code>## 🧑 角色</code>（或大廳即時改）</td></tr>
+      <tr><td>「評語字數 / 分析重點要求想改」</td><td>同檔 <code>## 📋 規則</code> / <code>## ✅ 需求</code> 段</td></tr>
+      <tr><td>「評語風格性禁止（別重複句式…）」</td><td>同檔 <code>## 🚫 禁止</code> 段</td></tr>
+      <tr><td>「要不要 AI 生數值 / 數值範圍」</td><td>HOST 大廳「🎲 AI 數值生成設定」→ 評語區（<code>verdicts.generateEffects</code> + 三個 range；按評語時還要勾 <code>useAINumbers</code>）</td></tr>
+      <tr><td>「要不要 AI 建議附帶狀態」</td><td>HOST 大廳 <code>verdicts.generateStatuses</code>（<b>預設關</b>）</td></tr>
+      <tr><td>「附帶狀態要正面還負面」</td><td>HOST 大廳「附帶狀態類型」（與議題共用 <code>pendingStatusPolarities</code>）</td></tr>
+      <tr><td>「schema 結構 / 系統禁止項措辭」</td><td>程式 <code>aiHelper.js</code> <code>generateAIEventVerdict</code>（工程師改）</td></tr>
+    </tbody>
+  </table>
+  <blockquote>提醒：<code>prompts/verdict_generation.md</code> 大廳即時改是暫時（記憶體），重啟還原；要永久改請編該 MD 檔。</blockquote>
   <a class="back" href="#">↑ 回頂部</a>
 </section>
 
